@@ -81,7 +81,7 @@ Assicurati di avere installati i seguenti nodi:
 - **Prossima irrigazione** visibile in `input_text.irrigation_next_run`
 
 ## 🌾 Sviluppi futuri
-
+- Previsione avanzate con machine-learning (in sviluppo )
 - Integrare suggerimenti su concimi o piante (in sviluppo)
 - Estendere le API a più fonti meteo (es. DarkSky, WeatherBit) (in sviluppo)
 
