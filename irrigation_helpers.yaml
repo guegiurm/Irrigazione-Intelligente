@@ -1,0 +1,164 @@
+# config/packages/irrigation_helpers.yaml
+
+
+## INPUT NUMBER
+input_number:
+  irrigation_soil_threshold:
+    name: Soglia umidità suolo
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: '%'
+    mode: slider
+
+  irrigation_rain_threshold:
+    name: Soglia pioggia (prossime 6h)
+    min: 0
+    max: 20
+    step: 0.1
+    unit_of_measurement: 'mm'
+    mode: slider
+
+  irrigation_duration_zone1:
+    name: Durata irrigazione zona terrazzo
+    min: 30
+    max: 1800
+    step: 30
+    unit_of_measurement: 'sec'
+    mode: slider
+
+  irrigation_total_rain_limit:
+    name: Soglia cumulativa pioggia 6 giorni
+    min: 0
+    max: 50
+    step: 1
+    unit_of_measurement: 'mm'
+    mode: slider
+    
+    
+  irrigation_temp_min:
+    name: Temperatura minima (°C)
+    initial: 10
+    min: 0
+    max: 50
+    step: 1
+    unit_of_measurement: '°C'
+  irrigation_temp_max:
+    name: Temperatura massima (°C)
+    initial: 35
+    min: 0
+    max: 50
+    step: 1
+    unit_of_measurement: '°C'
+  irrigation_hum_min:
+    name: Umidità minima media (%)
+    initial: 30
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: '%'
+
+    
+    
+
+## INPUT TEXT
+input_text:
+  irrigation_log:
+    name: Registro irrigazione
+    pattern: '.*'
+    initial: ''
+
+
+  irrigation_next_run:
+    name: Prossima irrigazione
+    initial: "–"
+    icon: mdi:update
+
+
+
+## INPUT BOOLEAN
+
+input_boolean:
+  irrigation_enable:
+    name: Abilita irrigazione automatica
+    initial: false
+    icon: mdi:water-pump
+
+  force_irrigation:
+    name: Forza irrigazione (bypass)
+    initial: false
+    icon: mdi:power-plug-off
+
+  irrigation_sensor_enable:
+    name: Abilita controllo umidità
+    initial: true
+    icon: mdi:water-percent
+
+
+  irrigation_slot1_enable:
+    name: Attiva Slot 1
+    initial: true
+    icon: mdi:calendar-clock
+
+## INPUT SELECT
+input_select:
+  zona_1_specie:
+    name: Seleziona specie Zona 1
+    options:
+      - Avocado
+      - Pomodoro
+      - Basilico
+      - Fragola
+      - Prezzemolo
+      - Orto generico
+    icon: mdi:leaf
+ 
+ 
+  irrigation_slot1_days:
+    name: Giorni irrigazione Slot 1
+    options:
+      - tutti i giorni
+      - giorni pari
+      - giorni dispari
+      - ogni 3 giorni
+      - ogni 4 giorni
+      - ogni 5 giorni
+      - lunedi
+      - martedi
+      - mercoledi
+      - giovedi
+      - venerdi
+      - sabato
+      - domenica
+
+      
+ ## INPUT DATETIME
+input_datetime:
+  irrigation_slot1_time:
+    name: Orario irrigazione Slot 1
+    has_date: false
+    has_time: true
+    
+    
+
+sensor:
+  - platform: history_stats
+    name: Irrigazioni settimana completa
+    entity_id: switch.centralina_irrigazione
+    state: 'on'
+    type: count
+    # da lunedì 00:00 di questa settimana
+    start: >
+      {{ (
+           now()
+           .replace(hour=0, minute=0, second=0, microsecond=0)
+           - timedelta(days=now().weekday())
+         ).isoformat() }}
+    # fino a domenica 23:59:59 di questa settimana
+    end: >
+      {{ (
+           now()
+           .replace(hour=23, minute=59, second=59, microsecond=0)
+           + timedelta(days=(6 - now().weekday()))
+         ).isoformat() }}
+

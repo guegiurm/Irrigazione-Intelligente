@@ -1,0 +1,837 @@
+[
+    {
+        "id": "455bcec23094e0a9",
+        "type": "subflow",
+        "name": "Zona di irrigazione",
+        "info": "",
+        "category": "",
+        "in": [
+            {
+                "x": 120,
+                "y": 160,
+                "wires": [
+                    {
+                        "id": "b883cfdab42f79d9"
+                    }
+                ]
+            }
+        ],
+        "out": [
+            {
+                "x": 1780,
+                "y": 160,
+                "wires": [
+                    {
+                        "id": "925e41fcf987efd2",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 1780,
+                "y": 220,
+                "wires": [
+                    {
+                        "id": "925e41fcf987efd2",
+                        "port": 1
+                    }
+                ]
+            }
+        ],
+        "env": [],
+        "meta": {},
+        "color": "#DDAA99"
+    },
+    {
+        "id": "e6697dbfc06fd0c6",
+        "type": "api-current-state",
+        "z": "455bcec23094e0a9",
+        "name": "Leggi umidità terreno",
+        "server": "295dc9c0.5a2076",
+        "version": 3,
+        "outputs": 1,
+        "halt_if": "",
+        "halt_if_type": "str",
+        "halt_if_compare": "is",
+        "entity_id": "sensor.pianta_avocado_soil_moisture",
+        "state_type": "num",
+        "blockInputOverrides": false,
+        "outputProperties": [
+            {
+                "property": "payload",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "entityState"
+            },
+            {
+                "property": "topic",
+                "propertyType": "msg",
+                "value": "soilMoist",
+                "valueType": "str"
+            }
+        ],
+        "for": "",
+        "forType": "num",
+        "override_topic": false,
+        "x": 880,
+        "y": 160,
+        "wires": [
+            [
+                "f10bc359d83de2c7"
+            ]
+        ]
+    },
+    {
+        "id": "ad79f0f0864981b9",
+        "type": "http request",
+        "z": "455bcec23094e0a9",
+        "name": "Open‑Meteo Forecast",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://api.open-meteo.com/v1/forecast?latitude=41.1207&longitude=16.8698&hourly=temperature_2m,relative_humidity_2m,precipitation,rain&timezone=auto&past_days=5&forecast_days=3",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "basic",
+        "senderr": false,
+        "headers": [],
+        "x": 640,
+        "y": 200,
+        "wires": [
+            [
+                "7bb31caa1e44d015",
+                "cb3a15cb8762b296"
+            ]
+        ]
+    },
+    {
+        "id": "7bb31caa1e44d015",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "Calcola pioggia prossime 6h",
+        "func": "// === Meteo: pioggia 6h + totale 6d (3g passati + 3g futuri) ===\nconst t   = msg.payload.hourly.time;\nconst r   = msg.payload.hourly.rain || msg.payload.hourly.precipitation;\nconst now = new Date();\n\n// prossime 6h\nlet rain6h = 0;\nlet idx = t.findIndex(s => new Date(s) >= now);\nif (idx < 0) idx = 0;\nfor (let i = 0; i < 6 && idx + i < r.length; i++) {\n  rain6h += Number(r[idx + i]);\n}\n\n\nlet past = 0, future = 0;\n// 5 giorni passati + 3 giorni futuri\nfor (let i = 0; i < t.length; i++) {\n  const d = new Date(t[i]);\n  // @ts-ignore\n  const diff = d - now;\n  if (diff < 0 && Math.abs(diff) <= 5 * 24 * 60 * 60 * 1000) past += Number(r[i]);\n  if (diff >= 0 && diff <= 3 * 24 * 60 * 60 * 1000) future += Number(r[i]);\n}\n\n\nmsg.payload = { rain6h, rainTotal6d: past + future };\nmsg.topic   = 'weather';\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 900,
+        "y": 200,
+        "wires": [
+            [
+                "f10bc359d83de2c7"
+            ]
+        ]
+    },
+    {
+        "id": "f10bc359d83de2c7",
+        "type": "join",
+        "z": "455bcec23094e0a9",
+        "name": "Unisci dati",
+        "mode": "custom",
+        "build": "object",
+        "property": "payload",
+        "propertyType": "msg",
+        "key": "topic",
+        "joiner": "",
+        "joinerType": "auto",
+        "useparts": true,
+        "accumulate": false,
+        "timeout": "1",
+        "count": "3",
+        "reduceRight": false,
+        "reduceExp": "",
+        "reduceInit": "",
+        "reduceInitType": "json",
+        "reduceFixup": "",
+        "x": 1390,
+        "y": 200,
+        "wires": [
+            [
+                "925e41fcf987efd2"
+            ]
+        ]
+    },
+    {
+        "id": "925e41fcf987efd2",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "Decisione irrigazione",
+        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │  Function: Decisione irrigazione con temperatura e umidità        │\n// └─────────────────────────────────────────────────────────────────────┘\n\nconst ha    = global.get('homeassistant').homeAssistant.states;\n\n// — soglie meteo/terreno già esistenti\nconst enable    = ha['input_boolean.irrigation_enable']?.state === 'on';\nconst force     = ha['input_boolean.force_irrigation']?.state === 'on';\nconst rain6hT   = Number(ha['input_number.irrigation_rain_threshold']?.state)   || 2;\nconst rainTot   = Number(ha['input_number.irrigation_total_rain_limit']?.state) || 20;\nconst soilT     = Number(ha['input_number.irrigation_soil_threshold']?.state)   || 30;\nconst dur       = Number(ha['input_number.irrigation_duration_zone1']?.state)   || 600;\n\n// — NUOVE soglie temperatura/umidità\nconst tempMin   = Number(ha['input_number.irrigation_temp_min']?.state)   || 10;\nconst tempMax   = Number(ha['input_number.irrigation_temp_max']?.state)   || 35;\nconst humMin    = Number(ha['input_number.irrigation_hum_min']?.state)    || 30;\n\n// — toggle suolo\nconst sensorEnabled = ha['input_boolean.irrigation_sensor_enable']?.state === 'on';\n\n// — destrutturo DA msg.payload soltanto le medie e l’umidità terreno\nconst {\n  avgTempToday,\n  avgTempYesterday,\n  avgHumToday,\n  avgHumYesterday,\n  soilMoist\n} = msg.payload;\n\n// — estraggo rain6h e rainTotal6d da payload.weather (evito undefined)\nconst weather     = msg.payload.weather || {};\nconst rain6h      = Number(weather.rain6h      || 0);\nconst rainTotal6d = Number(weather.rainTotal6d || 0);\n\n// — se sensore spento, soil = null\nconst soil = sensorEnabled\n  ? Number(soilMoist) || 0\n  : null;\n\n// — timestamp per log\nconst now = Date.now();\nconst tss = new Date(now).toLocaleString('it-IT',{\n  day:   '2-digit', month:'2-digit',\n  hour:  '2-digit', minute:'2-digit', second:'2-digit'\n});\n\n// === 1) Disabilitato? ===\nif (!enable && !force) {\n  node.status({ fill:'grey', shape:'ring', text:'Disabilitato' });\n  return [ null, { payload:{ reason:`[${tss}] Irrigazione disabilitata` } } ];\n}\n\n// === 2) Skip programmato o pioggia cumulata > soglia? ===\nconst skipKey   = 'skipUntil_z1';\nconst skipUntil = flow.get(skipKey) || 0;\nif (!force) {\n  if (skipUntil && now < skipUntil) {\n    node.status({ fill:'red', shape:'ring', text:'Skip fino ' + new Date(skipUntil).toLocaleDateString() });\n    return [ null, { payload:{ reason:`[${tss}] Skip programmato fino a ${new Date(skipUntil).toLocaleDateString()}` } } ];\n  }\n  if (rainTotal6d > rainTot) {\n    flow.set(skipKey, now + 2*24*60*60*1000);\n    node.status({ fill:'red', shape:'ring', text:`Salto 2g – pioggia ${rainTotal6d} mm` });\n    return [ null, { payload:{ reason:`[${tss}] Pioggia cumulata > soglia (${rainTotal6d} mm)` } } ];\n  }\n}\n\n// === 3) Controllo temperatura ===\nif (avgTempToday != null && (avgTempToday < tempMin || avgTempToday > tempMax)) {\n  node.status({ fill:'orange', shape:'ring', text:`Temp fuori soglia: ${avgTempToday.toFixed(1)}°C` });\n  return [ null, { payload:{ reason:`[${tss}] Temperatura media ${avgTempToday.toFixed(1)}°C fuori range [${tempMin}–${tempMax}]°C` } } ];\n}\n\n// === 4) Controllo umidità atmosferica ===\nif (avgHumToday != null && avgHumToday < humMin) {\n  node.status({ fill:'orange', shape:'ring', text:`Umidità bassa: ${avgHumToday.toFixed(0)}%` });\n  return [ null, { payload:{ reason:`[${tss}] Umidità media ${avgHumToday.toFixed(0)}% < soglia ${humMin}%` } } ];\n}\n\n// === 5) Branch irrigazione (pioggia + suolo se abilitato) ===\nif (\n  force\n  || (rain6h < rain6hT && (sensorEnabled ? soil < soilT : true))\n) {\n  node.status({ fill:'green', shape:'dot', text:`Irrigo ${dur}s` });\n  return [\n    { payload:{ duration: dur } },\n    { payload:{ reason:`[${tss}] Irrigazione avviata: durata ${dur}s` } }\n  ];\n}\n\n// === 6) Default skip con ragioni chiare ===\nlet reasons = [];\n\n// se troppa pioggia\nif (rain6h >= rain6hT) {\n  reasons.push(`pioggia ${rain6h} mm ≥ ${rain6hT} mm`);\n}\n// se sensore abilitato e terreno troppo umido\nif (sensorEnabled && soil !== null && soil >= soilT) {\n  reasons.push(`umidità suolo ${soil}% ≥ ${soilT}%`);\n}\n// se ancora vuoto, spiego caso misto\nif (reasons.length === 0) {\n  if (sensorEnabled) {\n    if (rain6h < rain6hT) {\n      reasons.push(`umidità ok ma pioggia insufficiente (${rain6h} mm < ${rain6hT} mm)`);\n    } else {\n      reasons.push(`pioggia ok ma terreno troppo umido (${soil}% ≥ ${soilT}%)`);\n    }\n  } else {\n    reasons.push(`pioggia ${rain6h} mm ≥ soglia ${rain6hT} mm`);\n  }\n}\n\nconst text = reasons.join(' & ');\nnode.status({ fill:'red', shape:'ring', text:`Skip: ${text}` });\nreturn [ null, { payload:{ reason:`[${tss}] Skip: ${text}` } } ];\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1580,
+        "y": 200,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "b883cfdab42f79d9",
+        "type": "cronplus",
+        "z": "455bcec23094e0a9",
+        "name": "",
+        "outputField": "payload",
+        "timeZone": "Europe/Rome",
+        "storeName": "file",
+        "commandResponseMsgOutput": "output2",
+        "defaultLocation": "41.11929075934667 16.858520507812496",
+        "defaultLocationType": "fixed",
+        "outputs": 2,
+        "options": [
+            {
+                "name": "slot1",
+                "topic": "slot1",
+                "payloadType": "default",
+                "payload": "",
+                "expressionType": "cron",
+                "expression": "0 * * * * * *",
+                "location": "",
+                "offset": "0",
+                "solarType": "all",
+                "solarEvents": "sunrise,sunset"
+            }
+        ],
+        "x": 320,
+        "y": 160,
+        "wires": [
+            [
+                "e6697dbfc06fd0c6"
+            ],
+            [
+                "0558caaaf53e69c8"
+            ]
+        ]
+    },
+    {
+        "id": "899cb9a90cd628c5",
+        "type": "api-call-service",
+        "z": "455bcec23094e0a9",
+        "name": "info next irrigation",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "input_text.set_value",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "input_text.irrigation_next_run"
+        ],
+        "labelId": [],
+        "data": "",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "blockInputOverrides": false,
+        "domain": "input_text",
+        "service": "set_value",
+        "service_domain": "input_text",
+        "x": 770,
+        "y": 320,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "0558caaaf53e69c8",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "next run",
+        "func": "// Function “Elabora next run” (gestione anche di slot rimossi)\n\n// 1) se cron-plus ha restituito un errore “not found”, pulisco il valore e esco\nif (msg.payload.error && msg.payload.error.includes('not found')) {\n  msg.payload = { data: { value: \"Errore cronPlus\" } };\n  return msg;\n}\n\n// 2) individua dove cron-plus ti ha messo lo status\n// può essere in msg.payload.result.status oppure in msg.payload.status\nconst st = msg.payload?.result?.status ?? msg.payload?.status;\nif (!st) {\n  // nessuno status valido → svuoto e esco\n  msg.payload = { data: { value: \"Irrigazione automatica Disabilitata\" } };\n  return msg;\n}\n\n// 3) estrai le due descrizioni (o stringhe vuote se mancanti)\nconst nd  = st.nextDescription  || st.nextDescr  || \"\";\nconst sch = st.description      || \"\";\n\n// 4) traduci “in X hours Y minutes Z seconds” → “Tra X ore Y minuti Z secondi”\nlet tradNext = nd\n  .replace(/^in\\s+/,          \"Tra \")\n  .replace(/(\\d+)\\s*hours?/,   \"$1 ore\")\n  .replace(/(\\d+)\\s*minutes?/, \"$1 minuti\")\n  .replace(/(\\d+)\\s*seconds?/, \"$1 secondi\");\n\n// 5) traduci la parte cron → “Alle hh:mm, ogni ...”\nlet tradSch = sch\n  .replace(/^At\\s+/,        \"Alle \")\n  .replace(/\\bevery\\b/,     \"ogni\")\n  .replace(/\\bMON|TUE|WED|THU|FRI|SAT|SUN\\b/g, d => {\n    const m = { MON:\"lun\", TUE:\"mar\", WED:\"mer\",\n                THU:\"gio\", FRI:\"ven\", SAT:\"sab\", SUN:\"dom\" };\n    return m[d] || d;\n  });\n\n// 6) componi la frase finale\nconst text = [ tradNext.trim(), tradSch.trim() ]\n  .filter(t => t)         // elimino eventuali stringhe vuote\n  .join(\" — \");           // “Tra ... — Alle ...”\n\n// 7) impacchetto per input_text.set_value\nmsg.payload = { data: { value: text } };\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 540,
+        "y": 320,
+        "wires": [
+            [
+                "899cb9a90cd628c5"
+            ]
+        ]
+    },
+    {
+        "id": "cb3a15cb8762b296",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "Calcola medie temperatura + umidità giorni correnti ",
+        "func": "// ──────────────────────────────────────────────────────────────────────────\n// Function “Calcola medie temperatura + umidità giorni correnti”\n// ──────────────────────────────────────────────────────────────────────────┘\n\nconst data = msg.payload.hourly;\nconst now  = new Date();\n\n// Estrai i due array di time e temperature/humidity\nconst times = data.time.map(t => new Date(t));\nconst temps = data.temperature_2m;\nconst hums  = data.relative_humidity_2m;\n\n// Calcola indice di inizio e fine per “oggi” e “ieri”\nconst startOfToday      = new Date(now.getFullYear(), now.getMonth(), now.getDate());\nconst startOfYesterday  = new Date(startOfToday);\nstartOfYesterday.setDate(startOfToday.getDate() - 1);\n\nlet sumTodayTemp = 0, countTodayTemp = 0;\nlet sumYestTemp  = 0, countYestTemp  = 0;\nlet sumTodayHum  = 0, countTodayHum  = 0;\nlet sumYestHum   = 0, countYestHum   = 0;\n\nfor (let i = 0; i < times.length; i++) {\n  const t = times[i];\n  if (t >= startOfToday) {\n    sumTodayTemp += temps[i];\n    sumTodayHum  += hums[i];\n    countTodayTemp++;\n    countTodayHum++;\n  } else if (t >= startOfYesterday && t < startOfToday) {\n    sumYestTemp += temps[i];\n    sumYestHum  += hums[i];\n    countYestTemp++;\n    countYestHum++;\n  }\n}\n\n// Costruisci weather con pioggia già calcolata dal nodo precedente\nconst weather = msg.payload.weather || { rain6h: 0, rainTotal6d: 0 };\n\nmsg.payload = {\n  // porto avanti il payload.weather\n  weather: weather,\n  avgTempToday:     countTodayTemp ? sumTodayTemp / countTodayTemp : null,\n  avgTempYesterday: countYestTemp  ? sumYestTemp  / countYestTemp  : null,\n  avgHumToday:      countTodayHum  ? sumTodayHum  / countTodayHum   : null,\n  avgHumYesterday:  countYestHum   ? sumYestHum   / countYestHum    : null,\n  soilMoist:        msg.payload.soilMoist\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 970,
+        "y": 240,
+        "wires": [
+            [
+                "f10bc359d83de2c7"
+            ]
+        ]
+    },
+    {
+        "id": "a98a386506d56521",
+        "type": "tab",
+        "label": "IRRIGAZIONE INTELLIGENTE",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "865d6d0fc95a9d0d",
+        "type": "group",
+        "z": "a98a386506d56521",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#a4a4a4"
+        },
+        "nodes": [
+            "014223fa2d91f298",
+            "596a2ff35f861045",
+            "dd60291e510c6140",
+            "65ea1ea978ab6cca",
+            "116d884cc6ffa4f9",
+            "eaa1a4f459e4723a",
+            "651b1a261494c0b5",
+            "3166c82bf742a434",
+            "663db00f09d7e07b",
+            "c4e2790bdc1345e9"
+        ],
+        "x": 1354,
+        "y": 59,
+        "w": 952,
+        "h": 202
+    },
+    {
+        "id": "59fcd22722f135ef",
+        "type": "group",
+        "z": "a98a386506d56521",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#a4a4a4"
+        },
+        "nodes": [
+            "4e31d236dec5c949",
+            "e8eedd47903baaaa",
+            "54097911decc8951",
+            "ee6172941c7fc978",
+            "a4e7f9de8e0682b9"
+        ],
+        "x": 74,
+        "y": 59,
+        "w": 612,
+        "h": 182
+    },
+    {
+        "id": "1195672dec9860c1",
+        "type": "group",
+        "z": "a98a386506d56521",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#a4a4a4"
+        },
+        "nodes": [
+            "56fd76f2317f8d35",
+            "3c732130286ffbf0"
+        ],
+        "x": 774,
+        "y": 79,
+        "w": 432,
+        "h": 142
+    },
+    {
+        "id": "4e31d236dec5c949",
+        "type": "comment",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "Zona 1 - IMPOSTAZIONI PARTENZA IRRIGAZIONE",
+        "info": "",
+        "x": 370,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "014223fa2d91f298",
+        "type": "api-call-service",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Notify Start",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "notify.mobile_app_iphone_di_giuseppe",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [],
+        "labelId": [],
+        "data": "",
+        "dataType": "json",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "blockInputOverrides": false,
+        "domain": "notify",
+        "service": "mobile_app_iphone_di_giuseppe",
+        "service_domain": "notify",
+        "x": 1690,
+        "y": 140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "596a2ff35f861045",
+        "type": "api-call-service",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Log Skip",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "input_text.set_value",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "input_text.irrigation_log"
+        ],
+        "labelId": [],
+        "data": "",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "blockInputOverrides": false,
+        "domain": "input_text",
+        "service": "set_value",
+        "service_domain": "input_text",
+        "x": 1620,
+        "y": 220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "dd60291e510c6140",
+        "type": "api-call-service",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Start Zona terrazzo",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "switch.turn_on",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "switch.centralina_irrigazione"
+        ],
+        "labelId": [],
+        "data": "{}",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "blockInputOverrides": false,
+        "domain": "switch",
+        "service": "turn_on",
+        "x": 1470,
+        "y": 180,
+        "wires": [
+            [
+                "65ea1ea978ab6cca"
+            ]
+        ]
+    },
+    {
+        "id": "65ea1ea978ab6cca",
+        "type": "delay",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Durata irrigazione",
+        "pauseType": "delay",
+        "timeout": "0",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 1690,
+        "y": 180,
+        "wires": [
+            [
+                "116d884cc6ffa4f9"
+            ]
+        ]
+    },
+    {
+        "id": "116d884cc6ffa4f9",
+        "type": "api-call-service",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Stop Zona terrazzo",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "switch.turn_off",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "switch.centralina_irrigazione"
+        ],
+        "labelId": [],
+        "data": "{}",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "blockInputOverrides": false,
+        "domain": "switch",
+        "service": "turn_off",
+        "x": 1910,
+        "y": 180,
+        "wires": [
+            [
+                "3166c82bf742a434"
+            ]
+        ]
+    },
+    {
+        "id": "eaa1a4f459e4723a",
+        "type": "function",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "function 1",
+        "func": "msg.payload =\n{\n    \"data\": {\n        \"title\": \"irrigazione\",\n        \"message\": \"Irrigazione avviata: durata \"+msg.payload.duration+\" s\",\n        \"data\": {\n            \"entity_id\": \"\",\n            \"push\": {\n                \"sound\": {\n                    \"name\": \"Default\",\n                    \"critical\": 0,\n                    \"volume\": 1\n                }\n            }\n        }\n    }\n}\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1440,
+        "y": 140,
+        "wires": [
+            [
+                "014223fa2d91f298"
+            ]
+        ]
+    },
+    {
+        "id": "651b1a261494c0b5",
+        "type": "function",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "function 2",
+        "func": "msg.payload = {\n    \"data\": {\n            \"value\":msg.payload.reason\n        }\n    }\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1450,
+        "y": 220,
+        "wires": [
+            [
+                "596a2ff35f861045"
+            ]
+        ]
+    },
+    {
+        "id": "e8eedd47903baaaa",
+        "type": "function",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "update cron slot1 ",
+        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │ Function: update cron slot1 (fix parsing time + cron fields)      │\n// └─────────────────────────────────────────────────────────────────────┘\n\n// leggo da HA\nconst ha      = global.get('homeassistant').homeAssistant.states;\nconst rawTime = ha['input_datetime.irrigation_slot1_time']?.state || '00:00';\n\n// estraggo solo HH:MM (scarto data e secondi)\nconst timePart = rawTime.includes(' ')\n  ? rawTime.split(' ')[1].slice(0,5)\n  : rawTime.slice(0,5);\n\nconst [h, m] = timePart.split(':');\nconst daysStr = (ha['input_select.irrigation_slot1_days']?.state || '').toLowerCase();\nconst slotEn  = ha['input_boolean.irrigation_slot1_enable']?.state === 'on';\nconst globalEn= ha['input_boolean.irrigation_enable']?.state === 'on';\n\n// 1) se disabilitato globalmente o di slot → remove\nif (!globalEn || !slotEn) {\n  return {\n    topic: 'slot1',\n    payload: {\n      command: 'remove',\n      name:    'slot1'\n    }\n  };\n}\n\n// mappa italiano → DOW\nconst mapIt = {\n  lunedi:    'MON',\n  martedi:   'TUE',\n  mercoledi: 'WED',\n  giovedi:   'THU',\n  venerdi:   'FRI',\n  sabato:    'SAT',\n  domenica:  'SUN'\n};\n\nlet expr;\n\n// tutti i giorni\nif (daysStr === 'tutti i giorni') {\n  expr = `0 ${m} ${h} * * *`;\n}\n// giorni pari\nelse if (daysStr === 'giorni pari') {\n  expr = `0 ${m} ${h} 2-30/2 * *`;\n}\n// giorni dispari\nelse if (daysStr === 'giorni dispari') {\n  expr = `0 ${m} ${h} 1-31/2 * *`;\n}\n// ogni 3 giorni\nelse if (daysStr === 'ogni 3 giorni') {\n  expr = `0 ${m} ${h} 1-31/3 * *`;\n}\n// ogni 4 giorni\nelse if (daysStr === 'ogni 4 giorni') {\n  expr = `0 ${m} ${h} 1-30/4 * *`;\n}\n// ogni 5 giorni\nelse if (daysStr === 'ogni 5 giorni') {\n  expr = `0 ${m} ${h} 1-30/5 * *`;\n}\n// lista DOW\nelse {\n  const arr = daysStr\n    .split(',')\n    .map(d => d.trim())\n    .filter(d => mapIt[d])\n    .map(d => mapIt[d]);\n  const dow = arr.length ? arr.join(',') : '*';\n  expr = `0 ${m} ${h} * * ${dow}`;\n}\n\n// invio comando a cron-plus\nreturn {\n  topic: 'slot1',\n  payload: {\n    command:        'update',\n    name:           'slot1',\n    expressionType: 'cron',\n    expression:     expr,\n    payloadType:    'default',\n    payload:        'schedule'\n  }\n};\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 530,
+        "y": 140,
+        "wires": [
+            [
+                "56fd76f2317f8d35"
+            ]
+        ]
+    },
+    {
+        "id": "54097911decc8951",
+        "type": "server-state-changed",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "state change",
+        "server": "295dc9c0.5a2076",
+        "version": 6,
+        "outputs": 1,
+        "exposeAsEntityConfig": "",
+        "entities": {
+            "entity": [
+                "input_datetime.irrigation_slot1_time",
+                "input_select.irrigation_slot1_days",
+                "input_boolean.irrigation_slot1_enable",
+                "input_boolean.irrigation_enable",
+                "input_boolean.force_irrigation"
+            ],
+            "substring": [],
+            "regex": []
+        },
+        "outputInitially": false,
+        "stateType": "str",
+        "ifState": "",
+        "ifStateType": "str",
+        "ifStateOperator": "is",
+        "outputOnlyOnStateChange": true,
+        "for": "0",
+        "forType": "num",
+        "forUnits": "minutes",
+        "ignorePrevStateNull": true,
+        "ignorePrevStateUnknown": true,
+        "ignorePrevStateUnavailable": true,
+        "ignoreCurrentStateUnknown": true,
+        "ignoreCurrentStateUnavailable": true,
+        "outputProperties": [
+            {
+                "property": "payload",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "entityState"
+            },
+            {
+                "property": "data",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "eventData"
+            },
+            {
+                "property": "topic",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "triggerId"
+            }
+        ],
+        "x": 170,
+        "y": 140,
+        "wires": [
+            [
+                "e8eedd47903baaaa",
+                "a4e7f9de8e0682b9"
+            ]
+        ]
+    },
+    {
+        "id": "ee6172941c7fc978",
+        "type": "function",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "prossima schedulazione",
+        "func": "// Function “Chiedi stato slot1”\nconst expr = flow.get('slot1_expr') || '* * * * *';\nmsg.topic   = 'status';\nmsg.payload = 'slot1';\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 550,
+        "y": 200,
+        "wires": [
+            [
+                "56fd76f2317f8d35"
+            ]
+        ]
+    },
+    {
+        "id": "a4e7f9de8e0682b9",
+        "type": "delay",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "3",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 360,
+        "y": 200,
+        "wires": [
+            [
+                "ee6172941c7fc978"
+            ]
+        ]
+    },
+    {
+        "id": "3166c82bf742a434",
+        "type": "delay",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 2080,
+        "y": 180,
+        "wires": [
+            [
+                "663db00f09d7e07b"
+            ]
+        ]
+    },
+    {
+        "id": "663db00f09d7e07b",
+        "type": "api-current-state",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "ancora on",
+        "server": "295dc9c0.5a2076",
+        "version": 3,
+        "outputs": 2,
+        "halt_if": "on",
+        "halt_if_type": "str",
+        "halt_if_compare": "is",
+        "entity_id": "switch.centralina_irrigazione",
+        "state_type": "str",
+        "blockInputOverrides": true,
+        "outputProperties": [
+            {
+                "property": "payload",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "entityState"
+            },
+            {
+                "property": "data",
+                "propertyType": "msg",
+                "value": "",
+                "valueType": "entity"
+            }
+        ],
+        "for": "0",
+        "forType": "num",
+        "forUnits": "minutes",
+        "override_topic": false,
+        "state_location": "payload",
+        "override_payload": "msg",
+        "entity_location": "data",
+        "override_data": "msg",
+        "x": 2220,
+        "y": 180,
+        "wires": [
+            [
+                "116d884cc6ffa4f9"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "56fd76f2317f8d35",
+        "type": "subflow:455bcec23094e0a9",
+        "z": "a98a386506d56521",
+        "g": "1195672dec9860c1",
+        "name": "",
+        "x": 990,
+        "y": 180,
+        "wires": [
+            [
+                "eaa1a4f459e4723a",
+                "a4e7f9de8e0682b9",
+                "dd60291e510c6140"
+            ],
+            [
+                "651b1a261494c0b5",
+                "a4e7f9de8e0682b9"
+            ]
+        ]
+    },
+    {
+        "id": "c4e2790bdc1345e9",
+        "type": "comment",
+        "z": "a98a386506d56521",
+        "g": "865d6d0fc95a9d0d",
+        "name": "Zona 1 - LOG E IRRIGAZIONE TRAMITE CENTALINA",
+        "info": "",
+        "x": 2020,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "3c732130286ffbf0",
+        "type": "comment",
+        "z": "a98a386506d56521",
+        "g": "1195672dec9860c1",
+        "name": "SUB FLOW (COMUNE A TUTTE LE ZONE NUOVE)",
+        "info": "",
+        "x": 990,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "295dc9c0.5a2076",
+        "type": "server",
+        "name": "Home Assistant",
+        "addon": true,
+        "rejectUnauthorizedCerts": true,
+        "ha_boolean": "",
+        "connectionDelay": false,
+        "cacheJson": false,
+        "heartbeat": false,
+        "heartbeatInterval": "",
+        "statusSeparator": "",
+        "enableGlobalContextStore": false
+    }
+]
