@@ -1,0 +1,251 @@
+type: vertical-stack
+cards:
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#zona1"
+    name: ""
+    show_attribute: false
+    show_last_changed: false
+    show_state: true
+    force_icon: false
+    trigger_close: true
+    auto_close: false
+    show_header: true
+    show_icon: true
+    scrolling_effect: true
+    sub_button: []
+    close_by_clicking_outside: false
+    background_update: true
+    close_on_click: false
+    button_type: state
+    icon: mdi:sprinkler-variant
+    show_name: false
+    tap_action:
+      action: none
+    entity: input_text.irrigation_next_run
+  - type: conditional
+    conditions:
+      - entity: timer.irrigazione_zona1
+        state: active
+    card:
+      type: custom:timer-bar-card
+      entity: timer.irrigazione_zona1
+      bar_height: 6px
+      bar_foreground: "#4caf50"
+      bar_background: "#eee"
+      layout: normal
+      resolution: seconds
+      invert: true
+  - type: custom:bubble-card
+    card_type: button
+    hash: "#irrigazione"
+    name: ""
+    show_attribute: false
+    show_last_changed: false
+    show_state: true
+    force_icon: false
+    trigger_close: true
+    auto_close: false
+    show_header: true
+    show_icon: true
+    scrolling_effect: true
+    sub_button: []
+    close_by_clicking_outside: false
+    background_update: true
+    close_on_click: false
+    button_type: state
+    icon: mdi:math-log
+    show_name: false
+    tap_action:
+      action: none
+    entity: input_text.irrigation_log
+  - type: custom:bubble-card
+    card_type: separator
+    name: Abilita / Disabilita
+    icon: mdi:toggle-switch-variant-off
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - features:
+          - type: toggle
+        type: tile
+        entity: input_boolean.irrigation_enable
+        name: Abilita irrigazione
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: toggle
+        type: tile
+        entity: input_boolean.force_irrigation
+        name: Bypass
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: toggle
+        type: tile
+        entity: input_boolean.irrigation_slot1_enable
+        name: Attiva slot 1
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: toggle
+        type: tile
+        entity: input_boolean.irrigation_sensor_enable
+        name: Sensore Umidità
+        features_position: bottom
+        vertical: false
+  - type: custom:bubble-card
+    card_type: separator
+    icon: mdi:cash-clock
+    name: Schedulazione
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - features:
+          - type: select-options
+        type: tile
+        entity: input_select.irrigation_slot1_days
+        name: Giorni slot 1
+        features_position: bottom
+        vertical: false
+        tap_action:
+          action: more-info
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        entity: input_number.irrigation_duration_zone1
+        name: Durata (sec)
+        features_position: bottom
+        vertical: false
+      - type: tile
+        entity: input_datetime.irrigation_slot1_time
+        name: Orario slot 1
+        features_position: bottom
+        vertical: false
+  - type: custom:bubble-card
+    card_type: separator
+    name: Parametri target
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        entity: input_number.irrigation_soil_threshold
+        name: Umidità suolo (%)
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        entity: input_number.irrigation_rain_threshold
+        name: Pioggia 6h (mm)
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        entity: input_number.irrigation_total_rain_limit
+        name: Pioggia 6d (mm)
+        features_position: bottom
+        vertical: false
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        features_position: bottom
+        vertical: false
+        entity: input_number.irrigation_temp_min
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        features_position: bottom
+        vertical: false
+        entity: input_number.irrigation_temp_max
+      - features:
+          - type: numeric-input
+            style: buttons
+        type: tile
+        features_position: bottom
+        vertical: false
+        entity: input_number.irrigation_hum_min
+  - type: custom:bubble-card
+    card_type: separator
+    icon: mdi:leak
+    name: Sensori
+  - square: false
+    type: grid
+    cards:
+      - type: custom:mini-graph-card
+        name: Eventi Irrigaz. (LUN-DOM)
+        entities:
+          - sensor.irrigazioni_settimana_completa
+        show:
+          graph: line
+          fill: false
+          legend: false
+          state_header: true
+          icon: true
+        height: 30
+        line_width: 6
+        group: false
+        color_thresholds:
+          - value: 0
+            color: "#e74c3c"
+          - value: 1
+            color: "#2ecc71"
+      - type: tile
+        entity: sensor.pianta_avocado_soil_moisture
+        features_position: bottom
+        vertical: false
+        name: Umidità terreno
+      - type: custom:mini-graph-card
+        name: Pioggia ultime 6 ore
+        entities:
+          - sensor.pioggia_ultime_6_ore
+        hours_to_show: 48
+        points_per_hour: 1
+      - type: custom:mini-graph-card
+        name: Pioggia ultimi 6 giorni
+        entities:
+          - sensor.pioggia_ultimi_6_giorni
+        hours_to_show: 144
+        points_per_hour: 1
+    columns: 2
+  - type: custom:bubble-card
+    card_type: separator
+  - type: markdown
+    content: >
+      | Controllo                  | Target consigliato   |
+      Note                                                                                 
+      |
+
+      |----------------------------|----------------------|---------------------------------------------------------------------------------------|
+
+      | **Umidità suolo**          | 30 % – 40 %          | Sotto il 30 % il
+      terreno è già troppo secco; sopra il 40 % rischi ristagni.           |
+
+      | **Pioggia ultime 6 h**     | 2 – 3 mm             | Se ha piovuto più di
+      2 mm nelle ultime ore, aspetta ancora.                           |
+
+      | **Pioggia tot. 6 giorni**  | 15 – 20 mm           | Se in una settimana
+      ha piovuto oltre 15 mm, puoi saltare 2 giorni successivi.         |
+
+      | **Temp. minima media**     | 8 – 10 °C            | Sotto questo range
+      la crescita rallenta e l’acqua rischia di gelare la pianta.        |
+
+      | **Temp. massima media**    | 30 – 35 °C           | Sopra i 35 °C
+      l’acqua evapora troppo in fretta e la pianta soffre per il calore.      |
+
+      | **Umidità relativa media** | 60 % – 75 %          | Con aria molto umida
+      (> 75 %) l’evapotraspirazione è bassa: non serve altra acqua.    |
+grid_options:
+  columns: full

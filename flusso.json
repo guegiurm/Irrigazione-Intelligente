@@ -122,7 +122,8 @@
         "y": 200,
         "wires": [
             [
-                "f10bc359d83de2c7"
+                "f10bc359d83de2c7",
+                "7b901dcba1e04b4f"
             ]
         ]
     },
@@ -147,11 +148,13 @@
         "reduceInit": "",
         "reduceInitType": "json",
         "reduceFixup": "",
-        "x": 1390,
+        "x": 1290,
         "y": 200,
         "wires": [
             [
-                "925e41fcf987efd2"
+                "925e41fcf987efd2",
+                "0bb656972bcbd822",
+                "df35cc32e56c26e2"
             ]
         ]
     },
@@ -160,14 +163,14 @@
         "type": "function",
         "z": "455bcec23094e0a9",
         "name": "Decisione irrigazione",
-        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │  Function: Decisione irrigazione con temperatura e umidità        │\n// └─────────────────────────────────────────────────────────────────────┘\n\nconst ha    = global.get('homeassistant').homeAssistant.states;\n\n// — soglie meteo/terreno già esistenti\nconst enable    = ha['input_boolean.irrigation_enable']?.state === 'on';\nconst force     = ha['input_boolean.force_irrigation']?.state === 'on';\nconst rain6hT   = Number(ha['input_number.irrigation_rain_threshold']?.state)   || 2;\nconst rainTot   = Number(ha['input_number.irrigation_total_rain_limit']?.state) || 20;\nconst soilT     = Number(ha['input_number.irrigation_soil_threshold']?.state)   || 30;\nconst dur       = Number(ha['input_number.irrigation_duration_zone1']?.state)   || 600;\n\n// — NUOVE soglie temperatura/umidità\nconst tempMin   = Number(ha['input_number.irrigation_temp_min']?.state)   || 10;\nconst tempMax   = Number(ha['input_number.irrigation_temp_max']?.state)   || 35;\nconst humMin    = Number(ha['input_number.irrigation_hum_min']?.state)    || 30;\n\n// — toggle suolo\nconst sensorEnabled = ha['input_boolean.irrigation_sensor_enable']?.state === 'on';\n\n// — destrutturo DA msg.payload soltanto le medie e l’umidità terreno\nconst {\n  avgTempToday,\n  avgTempYesterday,\n  avgHumToday,\n  avgHumYesterday,\n  soilMoist\n} = msg.payload;\n\n// — estraggo rain6h e rainTotal6d da payload.weather (evito undefined)\nconst weather     = msg.payload.weather || {};\nconst rain6h      = Number(weather.rain6h      || 0);\nconst rainTotal6d = Number(weather.rainTotal6d || 0);\n\n// — se sensore spento, soil = null\nconst soil = sensorEnabled\n  ? Number(soilMoist) || 0\n  : null;\n\n// — timestamp per log\nconst now = Date.now();\nconst tss = new Date(now).toLocaleString('it-IT',{\n  day:   '2-digit', month:'2-digit',\n  hour:  '2-digit', minute:'2-digit', second:'2-digit'\n});\n\n// === 1) Disabilitato? ===\nif (!enable && !force) {\n  node.status({ fill:'grey', shape:'ring', text:'Disabilitato' });\n  return [ null, { payload:{ reason:`[${tss}] Irrigazione disabilitata` } } ];\n}\n\n// === 2) Skip programmato o pioggia cumulata > soglia? ===\nconst skipKey   = 'skipUntil_z1';\nconst skipUntil = flow.get(skipKey) || 0;\nif (!force) {\n  if (skipUntil && now < skipUntil) {\n    node.status({ fill:'red', shape:'ring', text:'Skip fino ' + new Date(skipUntil).toLocaleDateString() });\n    return [ null, { payload:{ reason:`[${tss}] Skip programmato fino a ${new Date(skipUntil).toLocaleDateString()}` } } ];\n  }\n  if (rainTotal6d > rainTot) {\n    flow.set(skipKey, now + 2*24*60*60*1000);\n    node.status({ fill:'red', shape:'ring', text:`Salto 2g – pioggia ${rainTotal6d} mm` });\n    return [ null, { payload:{ reason:`[${tss}] Pioggia cumulata > soglia (${rainTotal6d} mm)` } } ];\n  }\n}\n\n// === 3) Controllo temperatura ===\nif (avgTempToday != null && (avgTempToday < tempMin || avgTempToday > tempMax)) {\n  node.status({ fill:'orange', shape:'ring', text:`Temp fuori soglia: ${avgTempToday.toFixed(1)}°C` });\n  return [ null, { payload:{ reason:`[${tss}] Temperatura media ${avgTempToday.toFixed(1)}°C fuori range [${tempMin}–${tempMax}]°C` } } ];\n}\n\n// === 4) Controllo umidità atmosferica ===\nif (avgHumToday != null && avgHumToday < humMin) {\n  node.status({ fill:'orange', shape:'ring', text:`Umidità bassa: ${avgHumToday.toFixed(0)}%` });\n  return [ null, { payload:{ reason:`[${tss}] Umidità media ${avgHumToday.toFixed(0)}% < soglia ${humMin}%` } } ];\n}\n\n// === 5) Branch irrigazione (pioggia + suolo se abilitato) ===\nif (\n  force\n  || (rain6h < rain6hT && (sensorEnabled ? soil < soilT : true))\n) {\n  node.status({ fill:'green', shape:'dot', text:`Irrigo ${dur}s` });\n  return [\n    { payload:{ duration: dur } },\n    { payload:{ reason:`[${tss}] Irrigazione avviata: durata ${dur}s` } }\n  ];\n}\n\n// === 6) Default skip con ragioni chiare ===\nlet reasons = [];\n\n// se troppa pioggia\nif (rain6h >= rain6hT) {\n  reasons.push(`pioggia ${rain6h} mm ≥ ${rain6hT} mm`);\n}\n// se sensore abilitato e terreno troppo umido\nif (sensorEnabled && soil !== null && soil >= soilT) {\n  reasons.push(`umidità suolo ${soil}% ≥ ${soilT}%`);\n}\n// se ancora vuoto, spiego caso misto\nif (reasons.length === 0) {\n  if (sensorEnabled) {\n    if (rain6h < rain6hT) {\n      reasons.push(`umidità ok ma pioggia insufficiente (${rain6h} mm < ${rain6hT} mm)`);\n    } else {\n      reasons.push(`pioggia ok ma terreno troppo umido (${soil}% ≥ ${soilT}%)`);\n    }\n  } else {\n    reasons.push(`pioggia ${rain6h} mm ≥ soglia ${rain6hT} mm`);\n  }\n}\n\nconst text = reasons.join(' & ');\nnode.status({ fill:'red', shape:'ring', text:`Skip: ${text}` });\nreturn [ null, { payload:{ reason:`[${tss}] Skip: ${text}` } } ];\n",
+        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │  Function: Decisione irrigazione con temperatura e umidità        │\n// └─────────────────────────────────────────────────────────────────────┘\n\nconst ha    = global.get('homeassistant').homeAssistant.states;\n\n// — soglie “classiche”\nconst enable    = ha['input_boolean.irrigation_enable']?.state === 'on';\nconst force     = ha['input_boolean.force_irrigation']?.state === 'on';\nconst rain6hT   = Number(ha['input_number.irrigation_rain_threshold']?.state)   || 2;\nconst rainTot   = Number(ha['input_number.irrigation_total_rain_limit']?.state) || 20;\nconst soilT     = Number(ha['input_number.irrigation_soil_threshold']?.state)   || 30;\nconst dur       = Number(ha['input_number.irrigation_duration_zone1']?.state)   || 600;\n\n// — nuove soglie temperatura/umidità atmosferica\nconst tempMin   = Number(ha['input_number.irrigation_temp_min']?.state)   || 10;\nconst tempMax   = Number(ha['input_number.irrigation_temp_max']?.state)   || 35;\nconst humMin    = Number(ha['input_number.irrigation_hum_min']?.state)    || 30;\n\n// — toggle suolo\nconst sensorEnabled = ha['input_boolean.irrigation_sensor_enable']?.state === 'on';\n\n// — destrutturo DAL payload solo ciò che serve\nconst {\n  avgTempToday,\n  avgTempYesterday,\n  avgHumToday,\n  avgHumYesterday,\n  soilMoist      // <-- ATTENZIONE: lo estraiamo da msg.payload!\n} = msg.payload;\n\n// — estraggo pioggia dal payload.weather (con fallback a 0)\nconst weather     = msg.payload.weather || {};\nconst rain6h      = Number(weather.rain6h      || 0);\nconst rainTotal6d = Number(weather.rainTotal6d || 0);\n\n// — se il sensore suolo è spento, ignoro il valore: altrimenti prendo soilMoist\nconst soil = sensorEnabled\n  ? Number(soilMoist) || 0\n  : null;\n\n// — timestamp per i log\nconst now = Date.now();\nconst tss = new Date(now).toLocaleString('it-IT', {\n  day:   '2-digit', month:'2-digit',\n  hour:  '2-digit', minute:'2-digit', second:'2-digit'\n});\n\n// === 1) Disabilitato globalmente o bypass? ===\nif (!enable && !force) {\n  node.status({ fill:'grey', shape:'ring', text:'Disabilitato' });\n  return [ null, { payload:{ reason:`[${tss}] Irrigazione disabilitata` } } ];\n}\n\n// === 2) Skip programmato o cumulata 6d > soglia? ===\nconst skipKey   = 'skipUntil_z1';\nconst skipUntil = flow.get(skipKey) || 0;\nif (!force) {\n  if (skipUntil && now < skipUntil) {\n    node.status({ fill:'red', shape:'ring', text:`Skip fino ${new Date(skipUntil).toLocaleDateString()}` });\n    return [ null, { payload:{ reason:`[${tss}] Skip programmato fino a ${new Date(skipUntil).toLocaleDateString()}` } } ];\n  }\n  if (rainTotal6d > rainTot) {\n    flow.set(skipKey, now + 2*24*60*60*1000);\n    node.status({ fill:'red', shape:'ring', text:`Salto 2g – pioggia ${rainTotal6d} mm` });\n    return [ null, { payload:{ reason:`[${tss}] Pioggia cumulata > soglia (${rainTotal6d} mm)` } } ];\n  }\n}\n\n// === 3) Controllo temperatura media oggi ===\nif (avgTempToday != null && (avgTempToday < tempMin || avgTempToday > tempMax)) {\n  node.status({ fill:'orange', shape:'ring', text:`Temp fuori range: ${avgTempToday.toFixed(1)}°C` });\n  return [ null, { payload:{ reason:`[${tss}] Temperatura media ${avgTempToday.toFixed(1)}°C fuori range [${tempMin}–${tempMax}]` } } ];\n}\n\n// === 4) Controllo umidità atmosferica media oggi ===\nif (avgHumToday != null && avgHumToday < humMin) {\n  node.status({ fill:'orange', shape:'ring', text:`Umidità bassa: ${avgHumToday.toFixed(0)}%` });\n  return [ null, { payload:{ reason:`[${tss}] Umidità media ${avgHumToday.toFixed(0)}% < soglia ${humMin}%` } } ];\n}\n\n// === 5) Branch irrigazione ===\nif (\n  force\n  || (rain6h < rain6hT && (sensorEnabled ? soil < soilT : true))\n) {\n  node.status({ fill:'green', shape:'dot', text:`Irrigo ${dur}s` });\n  return [\n    {\n      payload: { duration: dur },\n      delay: dur * 1000  // <<<<<< chiave per il nodo delay\n    },\n    {\n      payload: {\n        reason: `[${tss}] Irrigazione avviata: durata ${dur}s`\n      }\n    }\n  ];\n}\n\n// === 6) Default skip con motivazioni chiare ===\nlet reasons = [];\n\n// troppa pioggia nelle ultime 6h?\nif (rain6h >= rain6hT) {\n  reasons.push(`pioggia ${rain6h} mm ≥ ${rain6hT} mm`);\n}\n// terreno troppo umido?\nif (sensorEnabled && soil !== null && soil >= soilT) {\n  reasons.push(`umidità suolo ${soil}% ≥ ${soilT}%`);\n}\n// se non ho ancora riempito motivi, spiego il caso misto\nif (reasons.length === 0) {\n  if (sensorEnabled) {\n    if (rain6h < rain6hT) {\n      reasons.push(`umidità ok ma pioggia insufficiente (${rain6h} mm < ${rain6hT} mm)`);\n    } else {\n      reasons.push(`pioggia ok ma terreno troppo umido (${soil}% ≥ ${soilT}%)`);\n    }\n  } else {\n    reasons.push(`pioggia ${rain6h} mm ≥ soglia ${rain6hT} mm`);\n  }\n}\n\nconst text = reasons.join(' & ');\nnode.status({ fill:'red', shape:'ring', text:`Skip: ${text}` });\nreturn [\n  null,\n  { payload:{ reason:`[${tss}] Skip: ${text}` } }\n];\n",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 1580,
+        "x": 1540,
         "y": 200,
         "wires": [
             [],
@@ -186,28 +189,17 @@
         "defaultLocation": "41.11929075934667 16.858520507812496",
         "defaultLocationType": "fixed",
         "outputs": 2,
-        "options": [
-            {
-                "name": "slot1",
-                "topic": "slot1",
-                "payloadType": "default",
-                "payload": "",
-                "expressionType": "cron",
-                "expression": "0 * * * * * *",
-                "location": "",
-                "offset": "0",
-                "solarType": "all",
-                "solarEvents": "sunrise,sunset"
-            }
-        ],
+        "options": [],
         "x": 320,
         "y": 160,
         "wires": [
             [
-                "e6697dbfc06fd0c6"
+                "e6697dbfc06fd0c6",
+                "ad79f0f0864981b9"
             ],
             [
-                "0558caaaf53e69c8"
+                "0558caaaf53e69c8",
+                "5d59e0e8edd8b76a"
             ]
         ]
     },
@@ -236,8 +228,8 @@
         "domain": "input_text",
         "service": "set_value",
         "service_domain": "input_text",
-        "x": 770,
-        "y": 320,
+        "x": 750,
+        "y": 340,
         "wires": [
             []
         ]
@@ -255,7 +247,7 @@
         "finalize": "",
         "libs": [],
         "x": 540,
-        "y": 320,
+        "y": 340,
         "wires": [
             [
                 "899cb9a90cd628c5"
@@ -281,6 +273,320 @@
                 "f10bc359d83de2c7"
             ]
         ]
+    },
+    {
+        "id": "96bd9a52da15f35f",
+        "type": "influxdb out",
+        "z": "455bcec23094e0a9",
+        "influxdb": "c03e503b29a4f8df",
+        "name": "",
+        "measurement": "",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "database",
+        "precisionV18FluxV20": "ms",
+        "retentionPolicyV18Flux": "",
+        "org": "organisation",
+        "bucket": "bucket",
+        "x": 1770,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "0bb656972bcbd822",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "preparo per db",
+        "func": "//PRENDO ANCHE LA DURATION DELL'IRRIGAZIONE\nconst ha    = global.get('homeassistant').homeAssistant.states;\nconst dur   = Number(ha['input_number.irrigation_duration_zone1']?.state)   || 600;\n\n// Helper per testare se è un numero valido\nfunction num(v) {\n  return (v !== null && v !== undefined && !isNaN(v)) ? Number(v) : null;\n}\n\n// Costruisco il campo measurement\nmsg.measurement = 'irrigation_metrics';\n\n// (Opzionale) tagga la zona, es. “slot1”\nmsg.tags = {\n  slot: msg.topic   // se msg.topic era “slot1”\n};\n\n// Preparo i fieldset filtrando i NaN\nmsg.payload = {\n  rain_6h:           num(msg.payload.slot1.weather.rain6h),\n  rain_6d:           num(msg.payload.slot1.weather.rainTotal6d),\n  soil_moist:        num(msg.payload.soilMoist),\n  temp_today:        num(msg.payload.slot1.avgTempToday),\n  temp_yesterday:    num(msg.payload.slot1.avgTempYesterday),\n  hum_today:         num(msg.payload.slot1.avgHumToday),\n  hum_yesterday:     num(msg.payload.slot1.avgHumYesterday),\n  durationIrrigazione: num(dur)\n};\n\n// Se vuoi, puoi rimuovere i campi null per renderlo più pulito:\nObject.keys(msg.payload).forEach(k => {\n  if (msg.payload[k] === null) delete msg.payload[k];\n});\n\n// InfluxDB out si aspetta:\n// - msg.measurement   “nome_della_misura”\n// - msg.payload       oggetto con solo campi numerici\n// - msg.tags          (facoltativo) tag string/string\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1500,
+        "y": 360,
+        "wires": [
+            [
+                "96bd9a52da15f35f"
+            ]
+        ]
+    },
+    {
+        "id": "3aa249545867cb43",
+        "type": "comment",
+        "z": "455bcec23094e0a9",
+        "name": "POPOLARE IL DATABASE CHE SERVIRà PER IL MACHINE LEARNING ALMENO UN ANNO DI DATI . MODLO PERSONALE.",
+        "info": "",
+        "x": 1850,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "df35cc32e56c26e2",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "function 9",
+        "func": "const ha = global.get('homeassistant').homeAssistant.states;\nconst dur = Number(ha['input_number.irrigation_duration_zone1']?.state) || 600;\n\n// Helper per numeri validi\nfunction num(v) {\n  return (v !== null && v !== undefined && !isNaN(v)) ? Number(v) : '';\n}\n\n// Estrai i dati dal payload originale\nconst rain_6h        = num(msg.payload.slot1.weather.rain6h);\nconst rain_6d        = num(msg.payload.slot1.weather.rainTotal6d);\nconst soil_moist     = num(msg.payload.soilMoist);\nconst temp_today     = num(msg.payload.slot1.avgTempToday);\nconst temp_yesterday = num(msg.payload.slot1.avgTempYesterday);\nconst hum_today      = num(msg.payload.slot1.avgHumToday);\nconst hum_yesterday  = num(msg.payload.slot1.avgHumYesterday);\nconst duration       = num(dur);\n\n// Costruisci una riga CSV\nconst row = [\n  new Date().toISOString(),\n  rain_6h,\n  rain_6d,\n  soil_moist,\n  temp_today,\n  temp_yesterday,\n  hum_today,\n  hum_yesterday,\n  duration\n];\n\nmsg.payload = row.join(\",\");\nmsg.filename = \"/share/irrigation_dataset.csv\";\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1480,
+        "y": 400,
+        "wires": [
+            [
+                "5fff2c4477609dc3"
+            ]
+        ]
+    },
+    {
+        "id": "5fff2c4477609dc3",
+        "type": "file",
+        "z": "455bcec23094e0a9",
+        "name": "",
+        "filename": "filename",
+        "filenameType": "msg",
+        "appendNewline": true,
+        "createDir": false,
+        "overwriteFile": "false",
+        "encoding": "utf8",
+        "x": 1640,
+        "y": 400,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2c9ae38bda434764",
+        "type": "comment",
+        "z": "455bcec23094e0a9",
+        "name": "ESPORTA I DATI DAL DATABASE E CREA UN CSV CHE SERVIRA' IN SEGUITO PER addestrare ML",
+        "info": "",
+        "x": 1770,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "5d59e0e8edd8b76a",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "function 11",
+        "func": "const now = Date.now();\nconst next = Date.parse(msg.payload.result.status.nextDate);\n\nif (!next || isNaN(next)) {\n    node.warn(\"Data non valida da cronplus.\");\n    return null;\n}\n\nconst diffSec = Math.floor((next - now) / 1000);\n\nif (diffSec > 0 && diffSec <= 86400) {\n    const hrs = String(Math.floor(diffSec / 3600)).padStart(2, '0');\n    const mins = String(Math.floor((diffSec % 3600) / 60)).padStart(2, '0');\n    const secs = String(diffSec % 60).padStart(2, '0');\n\n    const duration = `${hrs}:${mins}:${secs}`;\n\n    msg.payload = {\n        data:{\n            duration: duration,\n        }\n    };\nreturn msg;\n\n} else {\nmsg.payload = \"reset\";\nreturn msg\n\n}\n\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 550,
+        "y": 400,
+        "wires": [
+            [
+                "173c26bea2548ef4"
+            ]
+        ]
+    },
+    {
+        "id": "73635094d1d173ea",
+        "type": "api-call-service",
+        "z": "455bcec23094e0a9",
+        "name": "start timer irrigazione ",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "timer.start",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "timer.irrigazione_zona1"
+        ],
+        "labelId": [],
+        "data": "",
+        "dataType": "json",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": false,
+        "domain": "timer",
+        "service": "start",
+        "x": 920,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "6fdc72abd7621210",
+        "type": "api-call-service",
+        "z": "455bcec23094e0a9",
+        "name": "stop timer irrigazione ",
+        "server": "295dc9c0.5a2076",
+        "version": 7,
+        "debugenabled": false,
+        "action": "timer.cancel",
+        "floorId": [],
+        "areaId": [],
+        "deviceId": [],
+        "entityId": [
+            "timer.irrigazione_zona1"
+        ],
+        "labelId": [],
+        "data": "",
+        "dataType": "jsonata",
+        "mergeContext": "",
+        "mustacheAltTags": false,
+        "outputProperties": [],
+        "queue": "none",
+        "blockInputOverrides": true,
+        "domain": "timer",
+        "service": "cancel",
+        "x": 920,
+        "y": 380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "173c26bea2548ef4",
+        "type": "switch",
+        "z": "455bcec23094e0a9",
+        "name": "",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "reset",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 710,
+        "y": 400,
+        "wires": [
+            [
+                "6fdc72abd7621210"
+            ],
+            [
+                "73635094d1d173ea"
+            ]
+        ]
+    },
+    {
+        "id": "dcad6e4659c00310",
+        "type": "mqtt out",
+        "z": "455bcec23094e0a9",
+        "name": "pioggia_6h",
+        "topic": "meteo/pioggia_6h",
+        "qos": "0",
+        "retain": "true",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "d829640de202502a",
+        "x": 1310,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "7b901dcba1e04b4f",
+        "type": "function",
+        "z": "455bcec23094e0a9",
+        "name": "function 13",
+        "func": "let pioggia6h = msg.payload.rain6h;    // valore in mm\nlet pioggia6gg = msg.payload.rainTotal6d;  // valore in mm\n\nreturn [\n  { payload: pioggia6h, topic: \"meteo/pioggia_6h\" },\n  { payload: pioggia6gg, topic: \"meteo/pioggia_6gg\" }\n];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1110,
+        "y": 80,
+        "wires": [
+            [
+                "dcad6e4659c00310"
+            ],
+            [
+                "e7867ff2919b5d55"
+            ]
+        ]
+    },
+    {
+        "id": "e7867ff2919b5d55",
+        "type": "mqtt out",
+        "z": "455bcec23094e0a9",
+        "name": "pioggia_6gg",
+        "topic": "meteo/pioggia_6gg",
+        "qos": "0",
+        "retain": "true",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "d829640de202502a",
+        "x": 1310,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "d829640de202502a",
+        "type": "mqtt-broker",
+        "z": "455bcec23094e0a9",
+        "name": "",
+        "broker": "localhost",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "c03e503b29a4f8df",
+        "type": "influxdb",
+        "hostname": "localhost",
+        "port": 8086,
+        "protocol": "http",
+        "database": "irrigation_metrics",
+        "name": "database irrigazione_intelligente",
+        "usetls": false,
+        "tls": "",
+        "influxdbVersion": "1.x",
+        "url": "http://localhost:8086",
+        "timeout": 10,
+        "rejectUnauthorized": true
     },
     {
         "id": "a98a386506d56521",
@@ -338,7 +644,8 @@
             "e8eedd47903baaaa",
             "54097911decc8951",
             "ee6172941c7fc978",
-            "a4e7f9de8e0682b9"
+            "a4e7f9de8e0682b9",
+            "5a37ad0aad4175ef"
         ],
         "x": 74,
         "y": 59,
@@ -362,7 +669,7 @@
             "56fd76f2317f8d35",
             "3c732130286ffbf0"
         ],
-        "x": 774,
+        "x": 794,
         "y": 79,
         "w": 432,
         "h": 142
@@ -479,7 +786,7 @@
         "z": "a98a386506d56521",
         "g": "865d6d0fc95a9d0d",
         "name": "Durata irrigazione",
-        "pauseType": "delay",
+        "pauseType": "delayv",
         "timeout": "0",
         "timeoutUnits": "seconds",
         "rate": "1",
@@ -580,7 +887,7 @@
         "z": "a98a386506d56521",
         "g": "59fcd22722f135ef",
         "name": "update cron slot1 ",
-        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │ Function: update cron slot1 (fix parsing time + cron fields)      │\n// └─────────────────────────────────────────────────────────────────────┘\n\n// leggo da HA\nconst ha      = global.get('homeassistant').homeAssistant.states;\nconst rawTime = ha['input_datetime.irrigation_slot1_time']?.state || '00:00';\n\n// estraggo solo HH:MM (scarto data e secondi)\nconst timePart = rawTime.includes(' ')\n  ? rawTime.split(' ')[1].slice(0,5)\n  : rawTime.slice(0,5);\n\nconst [h, m] = timePart.split(':');\nconst daysStr = (ha['input_select.irrigation_slot1_days']?.state || '').toLowerCase();\nconst slotEn  = ha['input_boolean.irrigation_slot1_enable']?.state === 'on';\nconst globalEn= ha['input_boolean.irrigation_enable']?.state === 'on';\n\n// 1) se disabilitato globalmente o di slot → remove\nif (!globalEn || !slotEn) {\n  return {\n    topic: 'slot1',\n    payload: {\n      command: 'remove',\n      name:    'slot1'\n    }\n  };\n}\n\n// mappa italiano → DOW\nconst mapIt = {\n  lunedi:    'MON',\n  martedi:   'TUE',\n  mercoledi: 'WED',\n  giovedi:   'THU',\n  venerdi:   'FRI',\n  sabato:    'SAT',\n  domenica:  'SUN'\n};\n\nlet expr;\n\n// tutti i giorni\nif (daysStr === 'tutti i giorni') {\n  expr = `0 ${m} ${h} * * *`;\n}\n// giorni pari\nelse if (daysStr === 'giorni pari') {\n  expr = `0 ${m} ${h} 2-30/2 * *`;\n}\n// giorni dispari\nelse if (daysStr === 'giorni dispari') {\n  expr = `0 ${m} ${h} 1-31/2 * *`;\n}\n// ogni 3 giorni\nelse if (daysStr === 'ogni 3 giorni') {\n  expr = `0 ${m} ${h} 1-31/3 * *`;\n}\n// ogni 4 giorni\nelse if (daysStr === 'ogni 4 giorni') {\n  expr = `0 ${m} ${h} 1-30/4 * *`;\n}\n// ogni 5 giorni\nelse if (daysStr === 'ogni 5 giorni') {\n  expr = `0 ${m} ${h} 1-30/5 * *`;\n}\n// lista DOW\nelse {\n  const arr = daysStr\n    .split(',')\n    .map(d => d.trim())\n    .filter(d => mapIt[d])\n    .map(d => mapIt[d]);\n  const dow = arr.length ? arr.join(',') : '*';\n  expr = `0 ${m} ${h} * * ${dow}`;\n}\n\n// invio comando a cron-plus\nreturn {\n  topic: 'slot1',\n  payload: {\n    command:        'update',\n    name:           'slot1',\n    expressionType: 'cron',\n    expression:     expr,\n    payloadType:    'default',\n    payload:        'schedule'\n  }\n};\n",
+        "func": "// ┌─────────────────────────────────────────────────────────────────────┐\n// │ Function: update cron slot1 (fix parsing time + cron fields)      │\n// └─────────────────────────────────────────────────────────────────────┘\n\n// leggo da HA\nconst ha      = global.get('homeassistant').homeAssistant.states;\nconst rawTime = ha['input_datetime.irrigation_slot1_time']?.state || '00:00';\n\n// estraggo solo HH:MM (scarto data e secondi)\nconst timePart = rawTime.includes(' ')\n  ? rawTime.split(' ')[1].slice(0,5)\n  : rawTime.slice(0,5);\n\nconst [h, m] = timePart.split(':');\nconst daysStr = (ha['input_select.irrigation_slot1_days']?.state || '').toLowerCase();\nconst slotEn  = ha['input_boolean.irrigation_slot1_enable']?.state === 'on';\nconst globalEn= ha['input_boolean.irrigation_enable']?.state === 'on';\n\n// 1) se disabilitato globalmente o di slot → remove\nif (!globalEn || !slotEn) {\n  return {\n    topic: 'slot1',\n    payload: {\n      command: 'remove',\n      name:    'slot1'\n    }\n  };\n}\n\n// mappa italiano → DOW\nconst mapIt = {\n  lunedi:    'MON',\n  martedi:   'TUE',\n  mercoledi: 'WED',\n  giovedi:   'THU',\n  venerdi:   'FRI',\n  sabato:    'SAT',\n  domenica:  'SUN'\n};\n\nlet expr;\n\n// tutti i giorni\nif (daysStr === 'tutti i giorni') {\n  expr = `0 ${m} ${h} * * *`;\n}\n// giorni pari\nelse if (daysStr === 'giorni pari') {\n  expr = `0 ${m} ${h} 2-30/2 * *`;\n}\n// giorni dispari\nelse if (daysStr === 'giorni dispari') {\n  expr = `0 ${m} ${h} 1-31/2 * *`;\n}\n// ogni 3 giorni\nelse if (daysStr === 'ogni 3 giorni') {\n  expr = `0 ${m} ${h} 1-31/3 * *`;\n}\n// ogni 4 giorni\nelse if (daysStr === 'ogni 4 giorni') {\n  expr = `0 ${m} ${h} 1-30/4 * *`;\n}\n// ogni 5 giorni\nelse if (daysStr === 'ogni 5 giorni') {\n  expr = `0 ${m} ${h} 1-30/5 * *`;\n}\n// lista DOW\nelse {\n  const arr = daysStr\n    .split(',')\n    .map(d => d.trim())\n    .filter(d => mapIt[d])\n    .map(d => mapIt[d]);\n  const dow = arr.length ? arr.join(',') : '*';\n  expr = `0 ${m} ${h} * * ${dow}`;\n}\n\n// invio comando a cron-plus\nreturn {\n  topic: 'slot1',\n  payload: {\n    command:        'add',\n    name:           'slot1',\n    expressionType: 'cron',\n    expression:     expr,\n    payloadType:    'default',\n    payload:        'schedule'\n  }\n};\n",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -616,7 +923,7 @@
             "substring": [],
             "regex": []
         },
-        "outputInitially": false,
+        "outputInitially": true,
         "stateType": "str",
         "ifState": "",
         "ifStateType": "str",
@@ -784,7 +1091,7 @@
         "z": "a98a386506d56521",
         "g": "1195672dec9860c1",
         "name": "",
-        "x": 990,
+        "x": 1010,
         "y": 180,
         "wires": [
             [
@@ -816,9 +1123,134 @@
         "g": "1195672dec9860c1",
         "name": "SUB FLOW (COMUNE A TUTTE LE ZONE NUOVE)",
         "info": "",
-        "x": 990,
+        "x": 1010,
         "y": 120,
         "wires": []
+    },
+    {
+        "id": "3840efbf20ac5bb5",
+        "type": "influxdb in",
+        "z": "a98a386506d56521",
+        "influxdb": "c03e503b29a4f8df",
+        "name": "",
+        "query": "SELECT hum_today, hum_yesterday, rain_6d, rain_6h, soil_moist, temp_today, temp_yesterday, durationIrrigazione FROM irrigation_metrics;\n\n",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "organisation",
+        "x": 970,
+        "y": 400,
+        "wires": [
+            [
+                "6a0ef9b3701d057e"
+            ]
+        ]
+    },
+    {
+        "id": "a4f8403df7691c07",
+        "type": "inject",
+        "z": "a98a386506d56521",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "86400",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 730,
+        "y": 400,
+        "wires": [
+            [
+                "3840efbf20ac5bb5"
+            ]
+        ]
+    },
+    {
+        "id": "c58665e425eda6ea",
+        "type": "comment",
+        "z": "a98a386506d56521",
+        "name": "SELECT NEL DATABASE per creare il file csv che servira per addestrare il moello d ML almeno un anno di dati. ",
+        "info": "",
+        "x": 1020,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "5a37ad0aad4175ef",
+        "type": "inject",
+        "z": "a98a386506d56521",
+        "g": "59fcd22722f135ef",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1800",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 200,
+        "wires": [
+            [
+                "a4e7f9de8e0682b9"
+            ]
+        ]
+    },
+    {
+        "id": "6a0ef9b3701d057e",
+        "type": "function",
+        "z": "a98a386506d56521",
+        "name": "function 4",
+        "func": "let csv = \"time,rain_6h,rain_6d,soil_moist,temp_today,temp_yesterday,hum_today,hum_yesterday,durationIrrigazione\\n\";\n\nfunction num(n) {\n    return typeof n === \"number\" ? n : Number(n) || 0;\n}\n\nmsg.payload.forEach(row => {\n    const time = new Date(row.time).toISOString(); \n    const rain_6h = num(row.rain_6h);\n    const rain_6d = num(row.rain_6d);\n    const soil_moist = num(row.soil_moist);\n    const temp_today = num(row.temp_today);\n    const temp_yesterday = num(row.temp_yesterday);\n    const hum_today = num(row.hum_today);\n    const hum_yesterday = num(row.hum_yesterday);\n    const durationIrrigazione = num(row.durationIrrigazione);\n\n    csv += `${time},${rain_6h},${rain_6d},${soil_moist},${temp_today},${temp_yesterday},${hum_today},${hum_yesterday},${durationIrrigazione}\\n`;\n});\n\nmsg.payload = csv;\nmsg.filename = \"/share/irrigation_dataset.csv\";\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1220,
+        "y": 400,
+        "wires": [
+            [
+                "7bcd64672d67bfc6"
+            ]
+        ]
+    },
+    {
+        "id": "7bcd64672d67bfc6",
+        "type": "file",
+        "z": "a98a386506d56521",
+        "name": "",
+        "filename": "filename",
+        "filenameType": "msg",
+        "appendNewline": false,
+        "createDir": false,
+        "overwriteFile": "true",
+        "encoding": "utf8",
+        "x": 1380,
+        "y": 400,
+        "wires": [
+            []
+        ]
     },
     {
         "id": "295dc9c0.5a2076",

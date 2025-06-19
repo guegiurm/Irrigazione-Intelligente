@@ -1,7 +1,3 @@
-# config/packages/irrigation_helpers.yaml
-
-
-## INPUT NUMBER
 input_number:
   irrigation_soil_threshold:
     name: Soglia umidità suolo
@@ -21,9 +17,9 @@ input_number:
 
   irrigation_duration_zone1:
     name: Durata irrigazione zona terrazzo
-    min: 30
+    min: 10
     max: 1800
-    step: 30
+    step: 10
     unit_of_measurement: 'sec'
     mode: slider
 
@@ -66,12 +62,10 @@ input_text:
   irrigation_log:
     name: Registro irrigazione
     pattern: '.*'
-    initial: ''
 
 
   irrigation_next_run:
     name: Prossima irrigazione
-    initial: "–"
     icon: mdi:update
 
 
@@ -81,23 +75,19 @@ input_text:
 input_boolean:
   irrigation_enable:
     name: Abilita irrigazione automatica
-    initial: false
     icon: mdi:water-pump
 
   force_irrigation:
     name: Forza irrigazione (bypass)
-    initial: false
     icon: mdi:power-plug-off
 
   irrigation_sensor_enable:
     name: Abilita controllo umidità
-    initial: true
     icon: mdi:water-percent
 
 
   irrigation_slot1_enable:
     name: Attiva Slot 1
-    initial: true
     icon: mdi:calendar-clock
 
 ## INPUT SELECT
@@ -140,25 +130,59 @@ input_datetime:
     has_time: true
     
     
-
+ ## INPUT SENSOR
 sensor:
   - platform: history_stats
     name: Irrigazioni settimana completa
     entity_id: switch.centralina_irrigazione
     state: 'on'
     type: count
-    # da lunedì 00:00 di questa settimana
     start: >
       {{ (
            now()
            .replace(hour=0, minute=0, second=0, microsecond=0)
            - timedelta(days=now().weekday())
          ).isoformat() }}
-    # fino a domenica 23:59:59 di questa settimana
     end: >
       {{ (
            now()
            .replace(hour=23, minute=59, second=59, microsecond=0)
            + timedelta(days=(6 - now().weekday()))
          ).isoformat() }}
+
+
+template:
+  - sensor:
+      - name: "Irrigazione Countdown Zona 1"
+        state: >
+          {% if is_state('timer.irrigazione', 'active') %}
+            ⏳ Tempo per l’irrigazione: {{ state_attr('timer.irrigazione_zona1', 'remaining') }}
+          {% else %}
+            🌿 In attesa di irrigare
+          {% endif %}
+
+
+
+
+
+
+ ## SENSOR MQTT
+mqtt:
+  sensor:
+    - name: "Pioggia ultime 6 ore"
+      state_topic: "meteo/pioggia_6h"
+      unit_of_measurement: "mm"
+      device_class: precipitation
+
+    - name: "Pioggia ultimi 6 giorni"
+      state_topic: "meteo/pioggia_6gg"
+      unit_of_measurement: "mm"
+      device_class: precipitation
+
+
+
+## TIMER
+timer:
+  irrigazione_zona1:
+    name: Prossima irrigazione
 

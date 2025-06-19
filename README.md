@@ -1,95 +1,183 @@
-# 🌱 Irrigazione Intelligente con Node-RED e Home Assistant
+🌿 Progetto di Irrigazione Smart – Home Assistant + Node-RED + MQTT + DB
+Sistema completo per l'automazione dell'irrigazione basato su:
 
-Sistema avanzato di irrigazione automatica basato su **Node-RED** e **Home Assistant**, che utilizza sensori, previsioni meteo via API, soglie dinamiche e automazioni per ottimizzare il consumo d'acqua e la salute delle piante.
+Controllo intelligente con condizioni meteo e ambientali
 
-## 🚀 Caratteristiche principali
+UI evoluta con Lovelace e popup dinamici
 
-- **Gestione multi-zona**: ogni zona è gestita tramite subflow indipendenti (es. `switch.centralina_irrigazione`)
-- **Integrazione sensori**:
-  - Umidità del suolo (`sensor.*`)
-  - Temperatura e umidità atmosferica (`Open-Meteo API`)
-- **Previsioni meteo e storico pioggia**:
-  - Ultimi 5 giorni + prossimi 3
-  - Calcolo automatico della pioggia nelle prossime 6 ore
-- **Controllo intelligente**:
-  - Valuta soglie dinamiche configurabili: temperatura, umidità suolo, pioggia
-  - Salta irrigazioni in caso di pioggia eccessiva o suolo già umido
-- **Automazioni configurabili**:
-  - Fino a 3 slot orari per zona
-  - Possibilità di forzare manualmente l'irrigazione
-  - Skip temporanei automatici
-- **Pannello Home Assistant**:
-  - Interfaccia utente con slider, toggle e log
-  - Mostra la prossima irrigazione prevista
+Integrazione database per log e analisi
 
-## 🛠 Setup
+Raccolta dati storici per futuri algoritmi di machine learning
 
-### 1. Importazione dei flussi
+🧰 Stack Tecnologico
+Componente	Funzione
+Home Assistant	Interfaccia domotica e controllo logico
+Node-RED	Automazioni e logica dati
+MQTT	Bridge tra HA e Node-RED (dati meteo)
+MariaDB/MySQL	Persistenza dati meteo/stato
+HACS	UI personalizzate (cards Lovelace)
 
-Importa il file `flusso.json` direttamente in Node-RED. Ogni zona è rappresentata da un **subflow** con i relativi nodi per la logica di controllo, sensori e attivazione.
+🔗 Dipendenze & Custom Cards
+Installa tramite HACS:
 
-### 2. Helpers in Home Assistant
+swipe-card: swipe tra zone
 
-Importa il file `irrigation_helpers.yaml` in Home Assistant, che include:
+button-card: pulsanti dinamici
 
-- `input_boolean.irrigation_enable`, `input_boolean.force_irrigation`
-- `input_number.irrigation_duration_zone1`, `input_number.irrigation_soil_threshold`, `irrigation_temp_min`, `irrigation_temp_max`, ecc.
-- `input_datetime.irrigation_slot1_time`
-- `input_select.irrigation_slot1_days`
-- `input_text.irrigation_log`, `irrigation_next_run`
+timer-bar-card: visualizzazione countdown
 
-Questi helper sono fondamentali per controllare logica, soglie e schedule.
+mini-graph-card: dati meteo storici
 
-### 3. Pannello Lovelace
+bubble-card: popup responsive
 
-Il file `card_irrigation.yaml` contiene una dashboard Lovelace pronta, che include:
+Broker MQTT attivo (addon Mosquitto o esterno) necessario.
 
-- **Custom Cards richieste**:
-  - [`button-card`](https://github.com/custom-cards/button-card)
-  - [`auto-entities`](https://github.com/thomasloven/lovelace-auto-entities)
-  - [`card-mod`](https://github.com/thomasloven/lovelace-card-mod)
-  - [`slider-entity-row`](https://github.com/thomasloven/lovelace-slider-entity-row)
+📂 Struttura del Progetto
+📁 irrigation_helpers.yaml (Home Assistant)
+Contiene tutto il necessario per la logica lato HA:
 
-Per installarli puoi usare HACS (Home Assistant Community Store).
+input_boolean per attivazione irrigazione, bypass, slot
 
-### 4. Dipendenze Node-RED
+input_number per soglie di temperatura, pioggia, durata
 
-Assicurati di avere installati i seguenti nodi:
+input_select per programmazione irrigazione (giorni/settimana)
 
-- `node-red-contrib-home-assistant-websocket`
-- `node-red-contrib-cron-plus`
-- `node-red-node-random` (se usi delay casuali)
-- `node-red-node-fetch` (o `http request`)
+input_text per log e prossima irrigazione
 
-## 📊 Come funziona
+input_datetime per orari irrigazione slot
 
-1. Un trigger `cron-plus` valuta se lo slot è attivo.
-2. Il subflow acquisisce:
-   - Previsioni meteo (pioggia, temperatura, umidità)
-   - Umidità del terreno (se abilitato)
-3. Vengono calcolate:
-   - Medie giornaliere
-   - Pioggia cumulata (6h e 6 giorni)
-4. Il sistema decide:
-   - Irrigare con logica avanzata (basata su soglie e meteo)
-   - Saltare l'irrigazione con motivazione salvata nel log
+mqtt sensor:
 
-## 📱 Notifiche e Log
+sensor.pioggia_ultime_6_ore
 
-- **Notifiche push** in caso di avvio irrigazione
-- **Log skip o avvio** salvati in `input_text.irrigation_log`
-- **Prossima irrigazione** visibile in `input_text.irrigation_next_run`
+sensor.pioggia_ultimi_6_giorni
 
-## 🌾 Sviluppi futuri
-- Previsione avanzate con machine-learning (in sviluppo )
-- Integrare suggerimenti su concimi o piante (in sviluppo)
-- Estendere le API a più fonti meteo (es. DarkSky, WeatherBit) (in sviluppo)
+history_stats sensor: numero irrigazioni nella settimana
 
-## 📷 Screenshot
+timer: irrigazione in corso
 
-![UI Panel](./assets/ui-panel.png) <!-- Inserisci screenshot reale se disponibile -->
+template: calcolo tempo residuo
 
----
+📁 card_irrigation.yaml (UI Lovelace)
+Card principale:
+
+custom:swipe-card: due zone irrigazione
+
+custom:button-card: navigazione + log
+
+timer-bar-card: appare se irrigazione in corso
+
+Doppio tap per popup di zona
+
+📁 card_irrigation_popup.yaml (UI Popup Dettaglio)
+Popup avanzato per ogni zona:
+
+Stato sensori, log, soglie
+
+Grafici pioggia/temperatura/umidità
+
+Visualizzazione pianificazione
+
+Timer dinamico se attivo
+
+📁 flusso.json (Node-RED)
+Flusso completo che gestisce:
+
+1. 📡 Recupero Dati Meteo (API esterne)
+Pioggia ultime 6h
+
+Pioggia ultimi 6gg
+
+Temperatura, umidità media
+
+2. 📤 Pubblicazione su MQTT
+meteo/pioggia_6h
+
+meteo/pioggia_6gg
+
+3. 🗃️ Salvataggio su database (MariaDB/MySQL)
+Tabella irrigation_data
+
+Colonne:
+
+timestamp
+
+pioggia_6h
+
+pioggia_6gg
+
+temperatura
+
+umidita
+
+zona
+
+durata_irrigazione
+
+Query SQL automatiche per scrivere dati ogni 6 ore
+
+4. 📊 Raccolta Dati Annuali
+Aggregazione dati mensili/annuali
+
+Costruzione dataset per algoritmi ML futuri (es. irrigazione predittiva)
+
+🚀 Installazione
+1. Includi irrigation_helpers.yaml in configuration.yaml
+yaml
+Copia
+Modifica
+homeassistant:
+  packages: !include_dir_named packages
+📁 Assicurati che il file sia in config/packages/
+
+2. Importa i Flow in Node-RED
+Vai su Node-RED
+
+Menu → Importa → flusso.json
+
+Associa eventuali nodi MQTT, MariaDB e timer
+
+Salva & deploy
+
+3. Aggiungi le Card Lovelace
+Importa:
+
+card_irrigation.yaml nella tua dashboard principale
+
+card_irrigation_popup.yaml nelle viste #zona1, #zona2, ecc.
+
+4. Assicurati che i seguenti servizi siano configurati:
+Componente	Stato richiesto
+MQTT broker	Installato + operativo
+MariaDB	Accesso e credenziali validi
+HACS	Installato con cards
+timer.*	Attivati da automazioni o UI
+
+📈 Esempi d’Uso
+🌧 Stop irrigazione se pioggia > soglia
+
+🌡 Irrigazione attivata solo se temperatura > soglia min
+
+📅 Programmazione settimanale per zona
+
+🧠 Dataset annuale per irrigazione ottimizzata
+
+🧾 Log completo in input_text.irrigation_log (visibile in card)
+
+🧪 Debug & Manutenzione
+Verifica valori MQTT da Developer Tools → Entità
+
+Log SQL nel DB: usa tool tipo phpMyAdmin o SELECT * FROM irrigation_data
+
+Controlla che timer.irrigazione_* sia attivo per vedere barra
+
+💡 Estensioni Future
+
+Dashboard storiche Grafana via InfluxDB
+
+Irrigazione predittiva con ML (es. scikit-learn)
+
+Notifiche Telegram/Push in base a stato sistema
 
 ## 🧪 Debug
 
